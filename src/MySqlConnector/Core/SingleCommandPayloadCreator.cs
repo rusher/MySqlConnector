@@ -232,8 +232,25 @@ internal sealed class SingleCommandPayloadCreator : ICommandPayloadCreator
 		// write "new parameters bound" flag
 		writer.Write((byte) 1);
 
+
+		// reserve space for type information (2 bytes per parameter)
+		var typeInfoStart = writer.Position;
+		var typeBuffer = writer.GetSpan(parameters.Length * 2);
+		writer.Advance(parameters.Length * 2);
+
+		// write parameter names if using query attributes
+		if (supportsQueryAttributes)
+		{
+			for (var index = 0; index < parameterCount; index++)
+				writer.Write((byte) 0); // empty string for parameters
+			for (var index = parameterCount; index < parameters.Length; index++)
+				writer.WriteLengthEncodedString(parameters[index].ParameterName);
+		}
+
+		var options = command.CreateStatementPreparerOptions();
 		var guidFormat = command.Connection!.GuidFormat;
 
+		// single loop: compute types, write to reserved space, and write values
 		for (var index = 0; index < parameters.Length; index++)
 		{
 			// override explicit MySqlDbType with inferred type from the Value
@@ -255,20 +272,13 @@ internal sealed class SingleCommandPayloadCreator : ICommandPayloadCreator
 			if (mySqlDbType == MySqlDbType.Vector && command.Connection!.Session.ServerVersion.IsMariaDb)
 				mySqlDbType = MySqlDbType.LongBlob;
 
-			writer.Write(TypeMapper.ConvertToColumnTypeAndFlags(mySqlDbType, guidFormat));
+			// write type information to reserved space
+			var columnTypeAndFlags = TypeMapper.ConvertToColumnTypeAndFlags(mySqlDbType, guidFormat);
+			BinaryPrimitives.WriteUInt16LittleEndian(typeBuffer.Slice(index * 2), columnTypeAndFlags);
 
-			if (supportsQueryAttributes)
-			{
-				if (index < parameterCount)
-					writer.Write((byte) 0); // empty string
-				else
-					writer.WriteLengthEncodedString(parameter.ParameterName);
-			}
-		}
-
-		var options = command.CreateStatementPreparerOptions();
-		foreach (var parameter in parameters)
+			// write parameter value immediately
 			parameter.AppendBinary(writer, options);
+		}
 	}
 
 	private static bool WriteStoredProcedure(IMySqlCommand command, IDictionary<string, CachedProcedure?> cachedProcedures, ByteBufferWriter writer)
