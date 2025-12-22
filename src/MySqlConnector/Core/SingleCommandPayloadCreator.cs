@@ -232,23 +232,30 @@ internal sealed class SingleCommandPayloadCreator : ICommandPayloadCreator
 		// write "new parameters bound" flag
 		writer.Write((byte) 1);
 
+		var guidFormat = command.Connection!.GuidFormat;
+
 		for (var index = 0; index < parameters.Length; index++)
 		{
 			// override explicit MySqlDbType with inferred type from the Value
 			var parameter = parameters[index];
 			var mySqlDbType = parameter.MySqlDbType;
-			var typeMapping = (parameter.Value is null || parameter.Value == DBNull.Value) ? null : TypeMapper.Instance.GetDbTypeMapping(parameter.Value.GetType());
-			if (typeMapping is not null)
+
+			// override explicit MySqlDbType with inferred type from the Value
+			if (parameter.Value is not null && parameter.Value != DBNull.Value)
 			{
-				var dbType = typeMapping.DbTypes[0];
-				mySqlDbType = TypeMapper.Instance.GetMySqlDbTypeForDbType(dbType);
+				var typeMapping = TypeMapper.Instance.GetDbTypeMapping(parameter.Value.GetType());
+				if (typeMapping is not null)
+				{
+					var dbType = typeMapping.DbTypes[0];
+					mySqlDbType = TypeMapper.Instance.GetMySqlDbTypeForDbType(dbType);
+				}
 			}
 
 			// HACK: MariaDB doesn't have a dedicated Vector type so mark it as binary data
 			if (mySqlDbType == MySqlDbType.Vector && command.Connection!.Session.ServerVersion.IsMariaDb)
 				mySqlDbType = MySqlDbType.LongBlob;
 
-			writer.Write(TypeMapper.ConvertToColumnTypeAndFlags(mySqlDbType, command.Connection!.GuidFormat));
+			writer.Write(TypeMapper.ConvertToColumnTypeAndFlags(mySqlDbType, guidFormat));
 
 			if (supportsQueryAttributes)
 			{

@@ -18,6 +18,7 @@ internal sealed class TypeMapper
 		m_dbTypeMappingsByDbType = [];
 		m_columnTypeMetadataLookup = new(StringComparer.OrdinalIgnoreCase);
 		m_mySqlDbTypeToColumnTypeMetadata = [];
+		m_dbTypeToMySqlDbType = [];
 
 		// boolean
 		var typeBoolean = AddDbTypeMapping(new(typeof(bool), [DbType.Boolean], convert: static o => Convert.ToBoolean(o, CultureInfo.InvariantCulture)));
@@ -126,6 +127,23 @@ internal sealed class TypeMapper
 		// null
 		var typeNull = AddDbTypeMapping(new(typeof(object), [DbType.Object]));
 		AddColumnTypeMetadata(new("NULL", typeNull, MySqlDbType.Null));
+
+		// populate reverse lookup for DbType -> MySqlDbType once after all metadata is added
+		foreach (var pair in m_mySqlDbTypeToColumnTypeMetadata)
+		{
+			if (pair.Value.DbTypeMapping.DbTypes is not null)
+			{
+				foreach (var dbType in pair.Value.DbTypeMapping.DbTypes)
+				{
+#if !NETCOREAPP2_0_OR_GREATER && !NETSTANDARD2_1_OR_GREATER
+					if (!m_dbTypeToMySqlDbType.ContainsKey(dbType))
+						m_dbTypeToMySqlDbType.Add(dbType, pair.Key);
+#else
+					m_dbTypeToMySqlDbType.TryAdd(dbType, pair.Key);
+#endif
+				}
+			}
+		}
 	}
 
 	public IReadOnlyList<ColumnTypeMetadata> GetColumnTypeMetadata() => m_columnTypeMetadata.AsReadOnly();
@@ -136,12 +154,7 @@ internal sealed class TypeMapper
 
 	public MySqlDbType GetMySqlDbTypeForDbType(DbType dbType)
 	{
-		foreach (var pair in m_mySqlDbTypeToColumnTypeMetadata)
-		{
-			if (pair.Value.DbTypeMapping.DbTypes.Contains(dbType))
-				return pair.Key;
-		}
-		return MySqlDbType.VarChar;
+		return m_dbTypeToMySqlDbType.TryGetValue(dbType, out var mySqlDbType) ? mySqlDbType : MySqlDbType.VarChar;
 	}
 
 	private DbTypeMapping AddDbTypeMapping(DbTypeMapping dbTypeMapping)
@@ -370,4 +383,5 @@ internal sealed class TypeMapper
 	private readonly Dictionary<DbType, DbTypeMapping> m_dbTypeMappingsByDbType;
 	private readonly Dictionary<string, ColumnTypeMetadata> m_columnTypeMetadataLookup;
 	private readonly Dictionary<MySqlDbType, ColumnTypeMetadata> m_mySqlDbTypeToColumnTypeMetadata;
+	private readonly Dictionary<DbType, MySqlDbType> m_dbTypeToMySqlDbType;
 }
